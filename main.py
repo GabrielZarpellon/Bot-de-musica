@@ -16,9 +16,9 @@ def bot_start():
 
     yt_dl_options = {
         "format": "bestaudio/best",
-        "noplaylist": True,
         "quiet": True,
         "default_search": "auto",
+        "extract_flat": False
     }
 
     ytdl = yt_dlp.YoutubeDL(yt_dl_options)
@@ -28,7 +28,7 @@ def bot_start():
         "options": "-vn -filter:a volume=0.25"
     }
 
-    # ---------------- FUNÇÃO PARA TOCAR PRÓXIMA ----------------
+    # ============= Para tocar a próxima =============
     async def tocar_proxima(guild_id):
         if filas[guild_id]:
             musica = filas[guild_id].pop(0)
@@ -57,7 +57,11 @@ def bot_start():
         if message.author.bot:
             return
 
-        # ---------------- PLAY ----------------
+        # =========== HELP ==============
+        if message.content.startswith("!help"):
+            await message.channel.send("Comandos:\n 1. **!play**: tocar alguma música ou playlist\n 2. **!skip**: pular uma música\n 3. **!pause**: pausar a música\n 4. **!continue**: continuar a música pausada\n 5. **!stop**: parar tudo e desconectar o bot\n 6. **!fila**: mostrar as músicas na fila")
+
+        # ============== Play ===========
         if message.content.startswith("!play"):
 
             if len(message.content.split()) < 2:
@@ -81,12 +85,47 @@ def bot_start():
 
             url = message.content.split(maxsplit=1)[1]
 
-            await message.channel.send("🔎 Buscando música...")
+            await message.channel.send("Buscando música...")
 
             loop = asyncio.get_running_loop()
             data = await loop.run_in_executor(
                 None, lambda: ytdl.extract_info(url, download=False)
             )
+
+            # =============PLAYLIST ================
+            if "entries" in data:
+                # Limite de músicas por playlsit
+                musicas = data["entries"][:50]
+
+                await message.channel.send(f"📜 Adicionando {len(musicas)} músicas à fila...")
+
+                for item in musicas:
+                    if item is None:
+                        continue
+
+                    musica = {
+                        "url": item["url"],
+                        "titulo": item.get("title", "Título desconhecido"),
+                        "canal": message.channel
+                    }
+
+                    filas[guild_id].append(musica)
+
+            # ============= Caso uma unica música ==============
+            else:
+                musica = {
+                    "url": data["url"],
+                    "titulo": data.get("title", "Título desconhecido"),
+                    "canal": message.channel
+                }
+
+                filas[guild_id].append(musica)
+
+                await message.channel.send(f"📜 Adicionada à fila: {musica['titulo']}")
+
+            # Se não estiver tocando, começa
+            if not voice_client.is_playing():
+                await tocar_proxima(guild_id)
 
             if "entries" in data:
                 data = data["entries"][0]
@@ -99,21 +138,34 @@ def bot_start():
 
             if voice_client.is_playing():
                 filas[guild_id].append(musica)
-                await message.channel.send(
-                    f"📜 Adicionada à fila: {musica['titulo']}"
-                )
+                await message.channel.send(f"📜 Adicionada à fila: {musica['titulo']}"
+                                           )
             else:
                 filas[guild_id].append(musica)
                 await tocar_proxima(guild_id)
 
-        # ---------------- SKIP ----------------
+        # ============= SKIP =====================
         if message.content.startswith("!skip"):
             guild_id = message.guild.id
             if guild_id in voz_client and voz_client[guild_id].is_playing():
                 voz_client[guild_id].stop()
-                await message.channel.send("⏭️ Música pulada.")
+                await message.channel.send("Música pulada.")
 
-        # ---------------- STOP ----------------
+        # =========Pausar ============
+        if message.content.startswith("!pause"):
+            guild_id = message.guild.id
+            if guild_id in voz_client:
+                voz_client[guild_id].pause()
+                await message.channel.send("Música pausada.")
+
+        # ==========Continuar ===========
+        if message.content.startswith("!continue"):
+            guild_id = message.guild.id
+            if guild_id in voz_client:
+                voz_client[guild_id].resume()
+                await message.channel.send("Música retomada.")
+
+        # ============ STOP ==========
         if message.content.startswith("!stop"):
             guild_id = message.guild.id
             if guild_id in voz_client:
@@ -121,9 +173,10 @@ def bot_start():
                 voz_client[guild_id].stop()
                 await voz_client[guild_id].disconnect()
                 del voz_client[guild_id]
-                await message.channel.send("🛑 Fila limpa e bot desconectado.")
+                await message.channel.send("Fila limpa e bot desconectado.")
 
-        # ---------------- FILA ----------------
+        # ============ Mostrar fila =============
+
         if message.content.startswith("!fila"):
             guild_id = message.guild.id
             if guild_id in filas and filas[guild_id]:
